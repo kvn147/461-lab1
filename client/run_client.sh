@@ -1,3 +1,3 @@
 #!/bin/bash
-directory=$(dirname "$0")
-python3 "$directory"/client.py $1 $2
+dname=$(dirname ${BASH_SOURCE[0]})
+python3 $dname/client.py $1 $2
