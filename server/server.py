@@ -1,5 +1,7 @@
+import random
 import socket
 import struct
+import threading
 
 HOST = "127.0.0.1"
 PORT = 50007
@@ -16,18 +18,44 @@ def run_server() -> None:
     while True:
         message, client_address = server_socket.recvfrom(MESSAGE_SIZE)
 
-        header = message[:HEADER_SIZE]
-        payload_length, secret, step, student_id = struct.unpack(HEADER_FORMAT, header)
+        thread = threading.Thread(
+            target=handle_connection, args=(message, client_address)
+        )
 
-        payload = message[HEADER_SIZE : HEADER_SIZE + payload_length]
+        # Verify
+        #   1. Unexpected payload.
+        #   2. Fails to receive packet for 3s.
+        #   3. Bad step, secret, or student number.
+        #
+        # TODO
+        #   - What is an unexpected number of buffers received?
+        #   - How to do multi-threading?
 
-        if payload.decode() == "hello world\0":
-            response_payload = struct.pack(RESPONSE_FORMAT, 1, 2, 3, 4)
-            response_header = struct.pack(
-                HEADER_FORMAT, len(payload), secret, step, student_id
-            )
 
-            server_socket.sendto(response_header + response_payload, client_address)
+def handle_connection(message: bytes, client_address):
+    header = message[:HEADER_SIZE]
+    payload_length, secret, step, student_id = struct.unpack(HEADER_FORMAT, header)
+
+    payload = message[HEADER_SIZE : HEADER_SIZE + payload_length]
+
+    if payload.decode() == "hello world\0":
+        number = random.randint(1, 10)
+        length = random.randint(1, 10)
+        udp_port = random.randint(30000, 80000)
+        secret_a = random.randint(0, 1000)
+
+        response_payload = struct.pack(
+            RESPONSE_FORMAT, number, length, udp_port, secret_a
+        )
+        response_header = struct.pack(
+            HEADER_FORMAT, len(payload), secret, step, student_id
+        )
+
+        # TODO?
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        server_socket.bind((HOST, PORT))
+
+        server_socket.sendto(response_header + response_payload, client_address)
 
 
 if __name__ == "__main__":
