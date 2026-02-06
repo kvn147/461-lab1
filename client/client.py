@@ -100,19 +100,44 @@ def stage_b(num, length, udp_port, secretA):
 # Stage C:
 # ==================
 def stage_c(tcp_port, secretB):
-    pass
+    # create tcp socket
+    sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
+    sock.settimeout(TCP_TIMEOUT)
+    sock.connect((ADDRESS, tcp_port))
+    # get data and separate into values
+    data = sock.recv(BUFFER_LEN)
+    payload_len, psecret, step, sid = struct.unpack("!IIHH", data[:HEADER_LEN])
+    num2, len2, secretC, c = struct.unpack("!IIIc", data[HEADER_LEN:HEADER_LEN + payload_len])
+
+    print(f"C: {secretC}")
+    return sock, num2, len2, c, secretC
+
 
 # ==================
 # Stage D:
 # ==================
-def stage_d():
-    pass
+def stage_d(sock, num2, len2, c, secretC):
+    # generate packet to send
+    payload_bytes = c * len2
+    packet = build_packet(payload_bytes, secretC, STEP, STUDENT_ID)
+    # send num2 packets
+    for i in range(num2):
+        sock.send(packet)
+    # get response
+    data = sock.recv(BUFFER_LEN)
+    payload_len, psecret, step, sid = struct.unpack("!IIHH", data[:HEADER_LEN])
+    secretD = int.from_bytes(data[HEADER_LEN:HEADER_LEN + payload_len], "big")
+    sock.close()
+
+    print(f"D: {secretD}")
+    return secretD
+
 
 def main():
     num, length, udp_port, secretA = stage_a()
     tcp_port, secretB = stage_b(num, length, udp_port, secretA)
-    stage_c(tcp_port, secretB)
-    stage_d()
+    sock, num2, len2, c, secretC = stage_c(tcp_port, secretB)
+    secretD = stage_d(sock, num2, len2, c, secretC)
 
 if __name__ == "__main__":
     main()
