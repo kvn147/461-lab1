@@ -46,7 +46,7 @@ def handle_connection(
         session_state, tcp_port
     )
 
-    stage_d()
+    stage_d(session_state, connection, num_packets_2, data_length_2, character)
 
 
 def stage_a(
@@ -237,7 +237,7 @@ def step_b2(
 
 def stage_c(
     session_state: SessionState, tcp_port: int
-) -> tuple[socket.socket, int, int, str]:
+) -> tuple[socket.socket, int, int, int]:
     connection = step_c1(session_state, tcp_port)
 
     num_packets, data_length, character = step_c2(session_state, connection)
@@ -259,16 +259,14 @@ def step_c1(session_state: SessionState, tcp_port: int) -> socket.socket:
 
 def step_c2(
     session_state: SessionState, connection: socket.socket
-) -> tuple[int, int, str]:
+) -> tuple[int, int, int]:
     num_packets = random.randint(1, 10)
     data_length = random.randint(1, 10)
     secret_c = random.randint(0, 1000)
-    character = random.choice(string.ascii_lowercase)
+    character = ord(random.choice(string.ascii_lowercase))
 
     payload_format = "!IIIB"
-    payload = struct.pack(
-        payload_format, num_packets, data_length, secret_c, ord(character)
-    )
+    payload = struct.pack(payload_format, num_packets, data_length, secret_c, character)
     header = struct.pack(
         HEADER_FORMAT,
         len(payload),
@@ -289,7 +287,23 @@ def step_c2(
     return num_packets, data_length, character
 
 
-def stage_d():
+def stage_d(
+    session_state: SessionState,
+    connection: socket.socket,
+    num_packets: int,
+    packet_length: int,
+    character: int,
+):
+    pass
+
+
+def step_d1(
+    session_state: SessionState,
+    connection: socket.socket,
+    num_packets: int,
+    packet_length: int,
+    character: int,
+):
     pass
 
 
