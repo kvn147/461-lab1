@@ -35,14 +35,14 @@ def run_server() -> None:
 def handle_connection(
     message: bytes, server_socket: socket.socket, client_address: socket._RetAddress
 ):
-    session_state, num_packets, data_length, udp_port = step_a1(
+    session_state, num_packets, data_length, udp_port = stage_a(
         message, server_socket, client_address
     )
 
-    step_b1(session_state, num_packets, data_length, udp_port)
+    tcp_port = stage_b(session_state, num_packets, data_length, udp_port)
 
 
-def step_a1(
+def stage_a(
     message: bytes,
     server_socket: socket.socket,
     client_address: socket._RetAddress,
@@ -104,82 +104,128 @@ def step_a1(
     return session_state, num_packets, data_length, udp_port
 
 
+def stage_b(
+    session_state: SessionState, num_packets: int, data_length: int, udp_port: int
+) -> int:
+    server_socket, client_address = step_b1(
+        session_state, num_packets, data_length, udp_port
+    )
+
+    tcp_port = step_b2(session_state, server_socket, client_address)
+
+    return tcp_port
+
+
 def step_b1(
     session_state: SessionState, num_packets: int, data_length: int, udp_port: int
-):
-    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server_socket:
-        server_socket.bind((HOST, udp_port))
-        server_socket.settimeout(3)
+) -> tuple[socket.socket, socket._RetAddress]:
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server_socket.bind((HOST, udp_port))
+    server_socket.settimeout(3)
 
-        packet_id_length = 4
-        payload_length_no_padding = packet_id_length + data_length
-        padding = (-payload_length_no_padding) % 4
+    client_address = ()
 
-        expected_packet = 0
-        skipped_ack = False
+    packet_id_length = 4
+    payload_length_no_padding = packet_id_length + data_length
+    padding = (-payload_length_no_padding) % 4
 
-        while expected_packet < num_packets:
-            # Receive next packet.
-            message, client_address = server_socket.recvfrom(1024)
+    expected_packet = 0
+    skipped_ack = False
 
-            # Parse header.
-            header = message[:HEADER_LENGTH]
-            payload_length, incoming_secret, step, student_id = struct.unpack(
-                HEADER_FORMAT, header
+    while expected_packet < num_packets:
+        message, client_address = server_socket.recvfrom(1024)
+
+        # Parse header.
+        header = message[:HEADER_LENGTH]
+        payload_length, incoming_secret, step, student_id = struct.unpack(
+            HEADER_FORMAT, header
+        )
+
+        # Verify header.
+        if payload_length != packet_id_length + data_length:
+            raise Exception("Incorrect payload length")
+
+        if len(message) != HEADER_LENGTH + payload_length + padding:
+            raise Exception("Message not padded to 4 bytes")
+
+        if incoming_secret != session_state.secret:
+            raise Exception("Incorrect secret")
+
+        if step != session_state.step:
+            raise Exception("Incorrect step")
+
+        if student_id != session_state.student_id:
+            raise Exception("Incorrect student ID")
+
+        # Verify packet ID.
+        payload = message[HEADER_LENGTH : HEADER_LENGTH + payload_length]
+        (packet_id,) = struct.unpack("!I", payload[:packet_id_length])
+
+        if packet_id != expected_packet:
+            raise Exception("Incorrect packet ID")
+
+        # Verify data.
+        data = payload[packet_id_length : packet_id_length + data_length]
+
+        if data != b"\x00" * data_length:
+            raise Exception("Incorrect data")
+
+        # ACK logic.
+        should_ack = random.choice([True, False])
+
+        if not skipped_ack and should_ack:
+            should_ack = False
+            skipped_ack = True
+
+        if should_ack:
+            ack_payload = struct.pack("!I", packet_id)
+            ack_header = struct.pack(
+                HEADER_FORMAT,
+                len(ack_payload),
+                session_state.secret,
+                session_state.step,
+                session_state.student_id,
             )
 
-            # Verify header.
-            if payload_length != packet_id_length + data_length:
-                raise Exception("Incorrect payload length")
+            server_socket.sendto(ack_header + ack_payload, client_address)
 
-            if len(message) != HEADER_LENGTH + payload_length + padding:
-                raise Exception("Incorrect payload length with padding")
+            expected_packet += 1
 
-            if incoming_secret != session_state.secret:
-                raise Exception("Incorrect secret")
+    # Update session state to b2.
+    session_state.step = 2
 
-            if step != session_state.step:
-                raise Exception("Incorrect step")
+    return server_socket, client_address
 
-            if student_id != session_state.student_id:
-                raise Exception("Incorrect student ID")
 
-            # Verify packet ID.
-            payload = message[HEADER_LENGTH : HEADER_LENGTH + payload_length]
-            (packet_id,) = struct.unpack("!I", payload[:packet_id_length])
+def step_b2(
+    session_state: SessionState,
+    server_socket: socket.socket,
+    client_address: socket._RetAddress,
+) -> int:
 
-            if packet_id != expected_packet:
-                raise Exception("Incorrect packet ID")
+    # Generate payload values.
+    tcp_port = random.randint(30000, 65535)
+    secret_b = random.randint(0, 1000)
 
-            # Verify data.
-            data = payload[packet_id_length : packet_id_length + data_length]
+    # Build payload for b2.
+    payload_format = "!II"
+    payload = struct.pack(payload_format, tcp_port, secret_b)
+    header = struct.pack(
+        HEADER_FORMAT,
+        len(payload),
+        session_state.secret,
+        session_state.step,
+        session_state.student_id,
+    )
 
-            if data != b"\x00" * data_length:
-                raise Exception("Incorrect data")
+    server_socket.sendto(header + payload, client_address)
+    server_socket.close()
 
-            # ACK logic.
-            should_ack = random.choice([True, False])
+    # Update session to stage c1.
+    session_state.secret = secret_b
+    session_state.step = 1
 
-            if not skipped_ack and should_ack:
-                should_ack = False
-                skipped_ack = True
-
-            if should_ack:
-                ack_payload = struct.pack("!I", packet_id)
-                ack_header = struct.pack(
-                    HEADER_FORMAT,
-                    len(ack_payload),
-                    session_state.secret,
-                    session_state.step,
-                    session_state.student_id,
-                )
-
-                server_socket.sendto(ack_header + ack_payload, client_address)
-
-                expected_packet += 1
-
-        # Update session state to b2.
-        session_state.step = 2
+    return tcp_port
 
 
 if __name__ == "__main__":

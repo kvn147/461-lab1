@@ -24,16 +24,18 @@ def run_client():
         # Step b1
         num_packets, data_length, udp_port, secret = struct.unpack("!IIII", payload)
 
-        step_b1(client_socket, num_packets, data_length, udp_port, secret)
+        stage_b(client_socket, num_packets, data_length, udp_port, secret)
 
 
-def step_b1(
+def stage_b(
     client_socket: socket.socket,
     num_packets: int,
     data_length: int,
     udp_port: int,
     secret: int,
 ):
+    print("Step a1 passed")
+
     client_socket.settimeout(1)
 
     packet_id = 0
@@ -41,19 +43,26 @@ def step_b1(
     padding = (-payload_length_no_padding) % 4
 
     while packet_id < num_packets:
-        payload = struct.pack("!I", packet_id) + b"\x00" * (data_length + padding)
+        payload = struct.pack("!I", packet_id) + b"\x00" * data_length
         header = struct.pack(HEADER_FORMAT, len(payload), secret, 1, STUDENT_ID)
 
-        client_socket.sendto(header + payload, (HOST, udp_port))
+        client_socket.sendto(header + payload + padding * b"\x00", (HOST, udp_port))
 
         try:
             _ = client_socket.recvfrom(1024)
             packet_id += 1
-            print(f"ACK received for packet {packet_id} (I think)")
+            print(f"ACK received for packet {packet_id}")
         except TimeoutError:
+            print("ACK not received")
             continue
 
-    print("YEAH")
+    print("Step b1 passed")
+
+    message, _ = client_socket.recvfrom(1024)
+    payload = message[HEADER_LENGTH:]
+    tcp_port, secret_b = struct.unpack("!II", payload)
+
+    print("Step b2 passed")
 
 
 if __name__ == "__main__":
