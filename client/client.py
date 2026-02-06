@@ -3,14 +3,14 @@
 
 import socket
 import struct
+import sys
+import time
 
 STEP = 1
 STUDENT_ID = 147
 HEADER_LEN = 12
 BUFFER_LEN = 1024
-ADDRESS = "attu2.cs.washington.edu"
-PORT = 41201
-UDP_TIMEOUT = 0.5
+UDP_TIMEOUT = 1
 TCP_TIMEOUT = 5
 
 # ==================
@@ -32,8 +32,9 @@ def build_packet(payload_bytes, psecret, step, student_id):
 # ==================
 # Stage A:
 # ==================
-def stage_a():
-    # Create UDP socket
+def stage_a(server_address, server_port):
+    num, length, udp_port, secretA = None, None, None, None
+
     sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
 
     try:
@@ -42,7 +43,7 @@ def stage_a():
         payload_bytes = msg.encode('utf-8')
         packet = build_packet(payload_bytes, 0, STEP, STUDENT_ID)
 
-        sock.sendto(packet, (ADDRESS, PORT))
+        sock.sendto(packet, (server_address, server_port))
         sock.settimeout(UDP_TIMEOUT)
         data, addr = sock.recvfrom(BUFFER_LEN)
 
@@ -53,7 +54,7 @@ def stage_a():
         print(f"A: {secretA}")
 
     except socket.timeout:
-        pass
+        raise RuntimeError("Stage A timed out")
     finally:
         sock.close()
 
@@ -62,7 +63,7 @@ def stage_a():
 # ==================
 # Stage B:
 # ==================
-def stage_b(num, length, udp_port, secretA):
+def stage_b(num, length, udp_port, secretA, server_address):
     sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_DGRAM)
     sock.settimeout(UDP_TIMEOUT)
     id = 0
@@ -75,7 +76,7 @@ def stage_b(num, length, udp_port, secretA):
             payload_bytes = packet_id + zero_byte_padding
             packet = build_packet(payload_bytes, secretA, STEP, STUDENT_ID)
 
-            sock.sendto(packet, (ADDRESS, udp_port))
+            sock.sendto(packet, (server_address, udp_port))
             data, addr = sock.recvfrom(BUFFER_LEN)
 
             # ACK has header (12 bytes) + payload (4 bytes)
@@ -85,7 +86,7 @@ def stage_b(num, length, udp_port, secretA):
                 id += 1
     
         except socket.timeout:
-            pass
+            time.sleep(0.5)
 
     sock.settimeout(TCP_TIMEOUT)
     data, addr = sock.recvfrom(BUFFER_LEN)
@@ -99,11 +100,11 @@ def stage_b(num, length, udp_port, secretA):
 # ==================
 # Stage C:
 # ==================
-def stage_c(tcp_port, secretB):
+def stage_c(tcp_port, secretB, server_address):
     # create tcp socket
     sock = socket.socket(family=socket.AF_INET, type=socket.SOCK_STREAM)
     sock.settimeout(TCP_TIMEOUT)
-    sock.connect((ADDRESS, tcp_port))
+    sock.connect((server_address, tcp_port))
     # get data and separate into values
     data = sock.recv(BUFFER_LEN)
     payload_len, psecret, step, sid = struct.unpack("!IIHH", data[:HEADER_LEN])
@@ -134,9 +135,11 @@ def stage_d(sock, num2, len2, c, secretC):
 
 
 def main():
-    num, length, udp_port, secretA = stage_a()
-    tcp_port, secretB = stage_b(num, length, udp_port, secretA)
-    sock, num2, len2, c, secretC = stage_c(tcp_port, secretB)
+    server_address = sys.argv[1]
+    server_port = int(sys.argv[2])
+    num, length, udp_port, secretA = stage_a(server_address, server_port)
+    tcp_port, secretB = stage_b(num, length, udp_port, secretA, server_address)
+    sock, num2, len2, c, secretC = stage_c(tcp_port, secretB, server_address)
     secretD = stage_d(sock, num2, len2, c, secretC)
 
 if __name__ == "__main__":
