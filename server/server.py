@@ -2,6 +2,7 @@ import random
 import socket
 import string
 import struct
+import sys
 import threading
 from dataclasses import dataclass
 
@@ -21,6 +22,9 @@ class SessionState:
 
 def run_server() -> None:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
+    host = sys.argv[1]
+    port = int(sys.argv[2])
     server_socket.bind((HOST, PORT))
 
     while True:
@@ -294,7 +298,12 @@ def stage_d(
     packet_length: int,
     character: int,
 ):
-    pass
+    ok = step_d1(session_state, connection, num_packets, packet_length, character)
+    if not ok:
+        connection.close()
+        return
+    
+    step_d2(session_state, connection)
 
 
 def step_d1(
@@ -304,7 +313,65 @@ def step_d1(
     packet_length: int,
     character: int,
 ):
-    pass
+    connection.settimeout(3)
+
+    padding_length = (-packet_length) % 4
+    expected_length = HEADER_LENGTH + packet_length + padding_length
+
+    for expected_packet in range(num_packets):
+        try:
+            message = connection.recv(expected_length)
+
+            if len(message) != expected_length:
+                raise Exception("Incorrect message length")
+
+            header = message[:HEADER_LENGTH]
+            payload_length, incoming_secret, step, student_id = struct.unpack(
+                HEADER_FORMAT, header
+            )
+
+            if payload_length != packet_length:
+                raise Exception("Incorrect payload length")
+
+            if incoming_secret != session_state.secret:
+                raise Exception("Incorrect secret")
+
+            if step != session_state.step:
+                raise Exception("Incorrect step")
+
+            if student_id != session_state.student_id:
+                raise Exception("Incorrect student ID")
+
+            payload = message[HEADER_LENGTH : HEADER_LENGTH + payload_length]
+            if payload != bytes([character]) * packet_length:
+                raise Exception("Incorrect payload data")
+            
+            padding = message[HEADER_LENGTH + payload_length :]
+            if padding != b"\x00" * padding_length:
+                raise Exception("Incorrect padding")
+            
+        except Exception as e:
+            print(f"Error in packet {expected_packet}: {e}")
+            return False
+        
+    return True
+
+def step_d2(
+    session_state: SessionState,
+    connection: socket.socket
+):
+    secret_d = random.randint(0, 1000)
+    payload = struct.pack("!I", secret_d)
+    header = struct.pack(
+        HEADER_FORMAT,
+        len(payload),
+        session_state.secret,
+        session_state.step,
+        session_state.student_id,
+    )
+
+    connection.sendall(header + payload)
+    connection.close()
 
 
 if __name__ == "__main__":
