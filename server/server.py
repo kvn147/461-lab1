@@ -1,5 +1,6 @@
 import random
 import socket
+import string
 import struct
 import threading
 from dataclasses import dataclass
@@ -35,11 +36,17 @@ def run_server() -> None:
 def handle_connection(
     message: bytes, server_socket: socket.socket, client_address: socket._RetAddress
 ):
-    session_state, num_packets, data_length, udp_port = stage_a(
+    session_state, num_packets_1, data_length_1, udp_port_1 = stage_a(
         message, server_socket, client_address
     )
 
-    tcp_port = stage_b(session_state, num_packets, data_length, udp_port)
+    tcp_port = stage_b(session_state, num_packets_1, data_length_1, udp_port_1)
+
+    connection, num_packets_2, data_length_2, character = stage_c(
+        session_state, tcp_port
+    )
+
+    stage_d()
 
 
 def stage_a(
@@ -207,7 +214,7 @@ def step_b2(
     tcp_port = random.randint(30000, 65535)
     secret_b = random.randint(0, 1000)
 
-    # Build payload for b2.
+    # Build payload for b2. Should already be 4B aligned so no need padding.
     payload_format = "!II"
     payload = struct.pack(payload_format, tcp_port, secret_b)
     header = struct.pack(
@@ -226,6 +233,64 @@ def step_b2(
     session_state.step = 1
 
     return tcp_port
+
+
+def stage_c(
+    session_state: SessionState, tcp_port: int
+) -> tuple[socket.socket, int, int, str]:
+    connection = step_c1(session_state, tcp_port)
+
+    num_packets, data_length, character = step_c2(session_state, connection)
+
+    return connection, num_packets, data_length, character
+
+
+def step_c1(session_state: SessionState, tcp_port: int) -> socket.socket:
+    listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    listener.settimeout(3)
+    listener.bind((HOST, tcp_port))
+    listener.listen()
+    connection, _ = listener.accept()
+
+    session_state.step = 2
+
+    return connection
+
+
+def step_c2(
+    session_state: SessionState, connection: socket.socket
+) -> tuple[int, int, str]:
+    num_packets = random.randint(1, 10)
+    data_length = random.randint(1, 10)
+    secret_c = random.randint(0, 1000)
+    character = random.choice(string.ascii_lowercase)
+
+    payload_format = "!IIIB"
+    payload = struct.pack(
+        payload_format, num_packets, data_length, secret_c, ord(character)
+    )
+    header = struct.pack(
+        HEADER_FORMAT,
+        len(payload),
+        session_state.secret,
+        session_state.step,
+        session_state.student_id,
+    )
+
+    padding_length = (-len(payload)) % 4
+    padding = b"\x00" * padding_length
+
+    connection.sendall(header + payload + padding)
+
+    # Update state to d1.
+    session_state.secret = secret_c
+    session_state.step = 1
+
+    return num_packets, data_length, character
+
+
+def stage_d():
+    pass
 
 
 if __name__ == "__main__":
