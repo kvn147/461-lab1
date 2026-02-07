@@ -1,0 +1,14 @@
+## Group:
+
+- Kevin Nguyen -- kevinn24
+- Wuihee Yap -- wuihee
+- Ziazan Kunnummal -- zknml
+
+## Secrets from a Successful Run:
+
+A: 71 B: 16 C: 280 D: 363
+
+## Instructions:
+
+We are using Python 3.14.
+To run the client program: ./run_client.sh <server_address> <port>
