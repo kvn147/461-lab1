@@ -22,9 +22,10 @@ class SessionState:
 
 def run_server() -> None:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
+
     host = sys.argv[1]
     port = int(sys.argv[2])
+
     server_socket.bind((HOST, PORT))
 
     while True:
@@ -40,17 +41,22 @@ def run_server() -> None:
 def handle_connection(
     message: bytes, server_socket: socket.socket, client_address: socket._RetAddress
 ):
-    session_state, num_packets_1, data_length_1, udp_port_1 = stage_a(
-        message, server_socket, client_address
-    )
+    try:
+        session_state, num_packets_1, data_length_1, udp_port_1 = stage_a(
+            message, server_socket, client_address
+        )
 
-    tcp_port = stage_b(session_state, num_packets_1, data_length_1, udp_port_1)
+        tcp_port = stage_b(session_state, num_packets_1, data_length_1, udp_port_1)
 
-    connection, num_packets_2, data_length_2, character = stage_c(
-        session_state, tcp_port
-    )
+        connection, num_packets_2, data_length_2, character = stage_c(
+            session_state, tcp_port
+        )
 
-    stage_d(session_state, connection, num_packets_2, data_length_2, character)
+        stage_d(session_state, connection, num_packets_2, data_length_2, character)
+
+    # On any failure, simply exit.
+    except Exception:
+        return
 
 
 def stage_a(
@@ -298,11 +304,8 @@ def stage_d(
     packet_length: int,
     character: int,
 ):
-    ok = step_d1(session_state, connection, num_packets, packet_length, character)
-    if not ok:
-        connection.close()
-        return
-    
+    step_d1(session_state, connection, num_packets, packet_length, character)
+
     step_d2(session_state, connection)
 
 
@@ -316,51 +319,51 @@ def step_d1(
     connection.settimeout(3)
 
     padding_length = (-packet_length) % 4
-    expected_length = HEADER_LENGTH + packet_length + padding_length
+    message_length = HEADER_LENGTH + packet_length + padding_length
 
-    for expected_packet in range(num_packets):
-        try:
-            message = connection.recv(expected_length)
+    buffer = b""
 
-            if len(message) != expected_length:
-                raise Exception("Incorrect message length")
+    for _ in range(num_packets):
+        # Receive until we have the full message.
+        while len(buffer) < message_length:
+            data = connection.recv(1024)
 
-            header = message[:HEADER_LENGTH]
-            payload_length, incoming_secret, step, student_id = struct.unpack(
-                HEADER_FORMAT, header
-            )
+            if not data:
+                raise Exception("Client disconnected")
 
-            if payload_length != packet_length:
-                raise Exception("Incorrect payload length")
+            buffer += data
 
-            if incoming_secret != session_state.secret:
-                raise Exception("Incorrect secret")
+        # Verify the message.
+        header = buffer[:HEADER_LENGTH]
+        payload_length, incoming_secret, step, student_id = struct.unpack(
+            HEADER_FORMAT, header
+        )
+        payload = buffer[HEADER_LENGTH : HEADER_LENGTH + payload_length]
 
-            if step != session_state.step:
-                raise Exception("Incorrect step")
+        if payload_length != packet_length:
+            raise Exception("Incorrect payload length")
 
-            if student_id != session_state.student_id:
-                raise Exception("Incorrect student ID")
+        if incoming_secret != session_state.secret:
+            raise Exception("Incorrect secret")
 
-            payload = message[HEADER_LENGTH : HEADER_LENGTH + payload_length]
-            if payload != bytes([character]) * packet_length:
-                raise Exception("Incorrect payload data")
-            
-            padding = message[HEADER_LENGTH + payload_length :]
-            if padding != b"\x00" * padding_length:
-                raise Exception("Incorrect padding")
-            
-        except Exception as e:
-            print(f"Error in packet {expected_packet}: {e}")
-            return False
-        
-    return True
+        if step != session_state.step:
+            raise Exception("Incorrect step")
 
-def step_d2(
-    session_state: SessionState,
-    connection: socket.socket
-):
+        if student_id != session_state.student_id:
+            raise Exception("Incorrect student ID")
+
+        if payload != bytes([character]) * packet_length:
+            raise Exception("Incorrect payload data")
+
+        # Consume packet.
+        buffer = buffer[message_length:]
+
+    session_state.step = 2
+
+
+def step_d2(session_state: SessionState, connection: socket.socket):
     secret_d = random.randint(0, 1000)
+
     payload = struct.pack("!I", secret_d)
     header = struct.pack(
         HEADER_FORMAT,
