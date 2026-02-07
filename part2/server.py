@@ -3,14 +3,12 @@ import random
 import socket
 import string
 import struct
+import sys
 import threading
 from dataclasses import dataclass
 
-HOST = "127.0.0.1"
-PORT = 50007
 HEADER_LENGTH = 12
 HEADER_FORMAT = "!IIHH"
-
 
 @dataclass
 class SessionState:
@@ -20,18 +18,24 @@ class SessionState:
 
 
 def run_server() -> None:
-    # host = sys.argv[1]
-    # port = int(sys.argv[2])
+    host = sys.argv[1]
+    port = int(sys.argv[2])
 
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server_socket:
         try:
-            server_socket.bind((HOST, PORT))
+            server_socket.bind((host, port))
         except socket.error as error:
             if error.errno == errno.EADDRINUSE:
                 print("Port already in use")
                 return
             else:
                 raise
+        except KeyboardInterrupt:
+            print("Client interrupted by user")
+            sys.exit(0)
+        except Exception as e:
+            print(f"Error: {e}")
+            sys.exit(1)
 
         # Server will wait for an incoming UDP message.
         while True:
@@ -46,7 +50,7 @@ def run_server() -> None:
 
 
 def handle_connection(
-    message: bytes, server_socket: socket.socket, client_address: socket._RetAddress
+    message: bytes, server_socket: socket.socket, client_address: tuple[str, int]
 ):
     try:
         session_state, num_packets_1, data_length_1, udp_port_1 = stage_a(
@@ -68,7 +72,7 @@ def handle_connection(
 def stage_a(
     message: bytes,
     server_socket: socket.socket,
-    client_address: socket._RetAddress,
+    client_address: tuple[str, int],
 ) -> tuple[SessionState, int, int, int]:
     # Parse header.
     header = message[:HEADER_LENGTH]
@@ -128,7 +132,7 @@ def stage_a(
 
 
 def stage_b(
-    session_state: SessionState, num_packets: int, data_length: int, udp_port: int
+    session_state: SessionState, num_packets: int, data_length: int, udp_port: int, host: str
 ) -> int:
     server_socket, client_address = step_b1(
         session_state, num_packets, data_length, udp_port
@@ -140,12 +144,12 @@ def stage_b(
 
 
 def step_b1(
-    session_state: SessionState, num_packets: int, data_length: int, udp_port: int
-) -> tuple[socket.socket, socket._RetAddress]:
+    session_state: SessionState, num_packets: int, data_length: int, udp_port: int, host: str
+) -> tuple[socket.socket, tuple[str, int]]:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
     try:
-        server_socket.bind((HOST, udp_port))
+        server_socket.bind((host, udp_port))
     except socket.error as error:
         if error.errno == errno.EADDRINUSE:
             print("Port already in use")
@@ -230,7 +234,7 @@ def step_b1(
 def step_b2(
     session_state: SessionState,
     server_socket: socket.socket,
-    client_address: socket._RetAddress,
+    client_address: tuple[str, int],
 ) -> int:
 
     # Generate payload values.
@@ -259,21 +263,21 @@ def step_b2(
 
 
 def stage_c(
-    session_state: SessionState, tcp_port: int
+    session_state: SessionState, tcp_port: int, host: str
 ) -> tuple[socket.socket, int, int, int]:
-    connection = step_c1(session_state, tcp_port)
+    connection = step_c1(session_state, tcp_port, host)
 
     num_packets, data_length, character = step_c2(session_state, connection)
 
     return connection, num_packets, data_length, character
 
 
-def step_c1(session_state: SessionState, tcp_port: int) -> socket.socket:
+def step_c1(session_state: SessionState, tcp_port: int, host: str) -> socket.socket:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.settimeout(3)
 
     try:
-        listener.bind((HOST, tcp_port))
+        listener.bind((host, tcp_port))
     except socket.error as error:
         if error.errno == errno.EADDRINUSE:
             print("Port already in use")
