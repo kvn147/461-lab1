@@ -1,8 +1,8 @@
+import errno
 import random
 import socket
 import string
 import struct
-import sys
 import threading
 from dataclasses import dataclass
 
@@ -10,7 +10,6 @@ HOST = "127.0.0.1"
 PORT = 50007
 HEADER_LENGTH = 12
 HEADER_FORMAT = "!IIHH"
-FIRST_MESSAGE_SIZE = 24
 
 
 @dataclass
@@ -21,21 +20,29 @@ class SessionState:
 
 
 def run_server() -> None:
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # host = sys.argv[1]
+    # port = int(sys.argv[2])
 
-    host = sys.argv[1]
-    port = int(sys.argv[2])
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as server_socket:
+        try:
+            server_socket.bind((HOST, PORT))
+        except socket.error as error:
+            if error.errno == errno.EADDRINUSE:
+                print("Port already in use")
+                return
+            else:
+                raise
 
-    server_socket.bind((HOST, PORT))
+        # Server will wait for an incoming UDP message.
+        while True:
+            message, client_address = server_socket.recvfrom(1024)
 
-    while True:
-        message, client_address = server_socket.recvfrom(FIRST_MESSAGE_SIZE)
-
-        # Create a new thread to handle incoming clients.
-        thread = threading.Thread(
-            target=handle_connection, args=(message, server_socket, client_address)
-        )
-        thread.start()
+            # Create a new thread to handle incoming clients.
+            thread = threading.Thread(
+                target=handle_connection,
+                args=(message, server_socket, client_address),
+            )
+            thread.start()
 
 
 def handle_connection(
@@ -54,7 +61,6 @@ def handle_connection(
 
         stage_d(session_state, connection, num_packets_2, data_length_2, character)
 
-    # On any failure, simply exit.
     except Exception:
         return
 
@@ -137,7 +143,14 @@ def step_b1(
     session_state: SessionState, num_packets: int, data_length: int, udp_port: int
 ) -> tuple[socket.socket, socket._RetAddress]:
     server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    server_socket.bind((HOST, udp_port))
+
+    try:
+        server_socket.bind((HOST, udp_port))
+    except socket.error as error:
+        if error.errno == errno.EADDRINUSE:
+            print("Port already in use")
+        raise
+
     server_socket.settimeout(3)
 
     client_address = ()
@@ -258,7 +271,14 @@ def stage_c(
 def step_c1(session_state: SessionState, tcp_port: int) -> socket.socket:
     listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     listener.settimeout(3)
-    listener.bind((HOST, tcp_port))
+
+    try:
+        listener.bind((HOST, tcp_port))
+    except socket.error as error:
+        if error.errno == errno.EADDRINUSE:
+            print("Port already in use")
+        raise
+
     listener.listen()
     connection, _ = listener.accept()
 
