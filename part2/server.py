@@ -44,23 +44,23 @@ def run_server() -> None:
             # Create a new thread to handle incoming clients.
             thread = threading.Thread(
                 target=handle_connection,
-                args=(message, server_socket, client_address),
+                args=(message, server_socket, client_address, host),
             )
             thread.start()
 
 
 def handle_connection(
-    message: bytes, server_socket: socket.socket, client_address: tuple[str, int]
+    message: bytes, server_socket: socket.socket, client_address: tuple[str, int], host: str
 ):
     try:
         session_state, num_packets_1, data_length_1, udp_port_1 = stage_a(
             message, server_socket, client_address
         )
 
-        tcp_port = stage_b(session_state, num_packets_1, data_length_1, udp_port_1)
+        tcp_port = stage_b(session_state, num_packets_1, data_length_1, udp_port_1, host)
 
         connection, num_packets_2, data_length_2, character = stage_c(
-            session_state, tcp_port
+            session_state, tcp_port, host
         )
 
         stage_d(session_state, connection, num_packets_2, data_length_2, character)
@@ -81,8 +81,9 @@ def stage_a(
     )
 
     # Verify header.
-    if len(message) < HEADER_LENGTH + payload_length:
-        raise Exception("Incomplete message size")
+    padding = (-payload_length) % 4
+    if len(message) != HEADER_LENGTH + payload_length + padding:
+        raise Exception("Message not padded to 4 bytes")
 
     if incoming_secret != 0:
         raise Exception("Incorrect secret")
@@ -117,7 +118,7 @@ def stage_a(
         HEADER_FORMAT,
         len(response_payload),
         session_state.secret,
-        session_state.step,
+        2,
         session_state.student_id,
     )
 
@@ -135,7 +136,7 @@ def stage_b(
     session_state: SessionState, num_packets: int, data_length: int, udp_port: int, host: str
 ) -> int:
     server_socket, client_address = step_b1(
-        session_state, num_packets, data_length, udp_port
+        session_state, num_packets, data_length, udp_port, host
     )
 
     tcp_port = step_b2(session_state, server_socket, client_address)
@@ -285,6 +286,7 @@ def step_c1(session_state: SessionState, tcp_port: int, host: str) -> socket.soc
 
     listener.listen()
     connection, _ = listener.accept()
+    listener.close()
 
     session_state.step = 2
 
